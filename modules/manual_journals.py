@@ -169,7 +169,6 @@ class ManualJournalsModule(Module):
 
     # =============================
     #          TESTS
-    #   Signature matches receivables
     # =============================
     def _test_overview_stats(self, df: Optional[pd.DataFrame]) -> pd.DataFrame:
         dfx = self._dfx
@@ -179,19 +178,33 @@ class ManualJournalsModule(Module):
 
         return pd.DataFrame([{
             "# of Journals": len(grouped),
+            "# of blank Journals": dfx["Journal ID"].isna().sum(),
             "Debit Value": round(dfx["Debit"].sum(), 2),
             "Credit Value": round(dfx["Credit"].sum(), 2),
             "Earliest Transaction Date": str(grouped["Transaction Date"].min()),
             "Latest Transaction Date": str(grouped["Transaction Date"].max()),
         }])
-
+#----------------------------------------------------
     def _test_journals_by_month(self, df: Optional[pd.DataFrame]) -> pd.DataFrame:
         grouped = self._grouped
         if grouped is None or grouped.empty:
             return pd.DataFrame([{"Info": "No prepared/grouped data available."}])
 
+        date_col = "Posting Date"
+
+        if date_col not in grouped.columns:
+            return pd.DataFrame([{"Info": f"Missing required date column: {date_col}"}])
+
+        # Ensure datetime
+        g = grouped.copy()
+        g[date_col] = pd.to_datetime(g[date_col], errors="coerce")
+
+        # Month-Year bucket (month start timestamp)
+        g["month_start"] = g[date_col].dt.to_period("M").dt.to_timestamp()
+        g["month_year"] = g["month_start"].dt.strftime("%b %Y")  # e.g. "Jan 2026"
+
         out = (
-            grouped.groupby(["month", "month_name"], dropna=False)
+            g.groupby(["month_start", "month_year"], dropna=False)
             .agg(
                 **{
                     self.PERIOD_LABEL: ("Journal ID", "size"),
@@ -199,27 +212,26 @@ class ManualJournalsModule(Module):
                 }
             )
             .reset_index()
-            .sort_values("month")
-            .rename(columns={"month_name": "Manual journals by month"})
+            .sort_values("month_start")
+            .rename(columns={"month_year": "Manual journals by month"})
         )
 
         out = out[["Manual journals by month", self.PERIOD_LABEL, "Sum of Journal Value"]]
         out.index = range(1, len(out) + 1)
 
-        # ✅ Chart inside the same function
-        # Line chart for value trend (you can swap to bar if preferred)
+        # Plotly chart
         fig = px.line(
             out.reset_index(drop=True),
             x="Manual journals by month",
             y="Sum of Journal Value",
-            title="Manual Journals – Sum of Journal Value by Month",
+            title="Manual Journals – Sum of Journal Value by Month-Year",
             markers=True,
         )
         fig.update_layout(xaxis_tickangle=-45)
 
-        out = self._attach_chart(out, "Journals Posted by Month", fig)
+        out = self._attach_chart(out, "Journals Posted by Month-Year", fig)
         return out
-
+#---------------------------------------------------
     def _test_journals_by_user(self, df: Optional[pd.DataFrame]) -> pd.DataFrame:
         grouped = self._grouped
         if grouped is None or grouped.empty:
@@ -305,21 +317,18 @@ class ManualJournalsModule(Module):
         grouped = self._grouped
         if grouped is None or grouped.empty:
             return pd.DataFrame([{"Info": "No prepared/grouped data available."}])
-
-        out = grouped[grouped["day_name"].isin(["Saturday", "Sunday"])].copy()
-        if out.empty:
-            return pd.DataFrame([{"Info": "No weekend postings found (Saturday/Sunday)."}])
-
-        out["WeekendDay"] = out["day_name"]
-
-        # ✅ Optional chart (count by weekend day)
-        counts = out["WeekendDay"].value_counts().reset_index()
-        counts.columns = ["WeekendDay", "Count"]
-        fig = px.bar(counts, x="WeekendDay", y="Count", title="Weekend Journals – Count by Day")
-        out = self._attach_chart(out, "Weekend Journals (Sat_Sun)", fig)
-
-        return out.reset_index(drop=True)
-
+        day_order = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]
+        counts = (
+            grouped["day_name"]
+            .value_counts(dropna=False)          # include NaN if any
+            .reindex(day_order, fill_value=0)    # ensure all 7 days appear
+            .rename_axis("Day")
+            .reset_index(name="Count")
+        )
+        # chart (counts by day)
+        fig = px.bar(counts, x="Day", y="Count", title="Journals – Count by Day")
+        counts = self._attach_chart(counts, "Journals (Count by Day)", fig)
+        return counts
     # -----------------------------
     # Tests list (Receivables style)
     # -----------------------------
