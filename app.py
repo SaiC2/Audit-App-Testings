@@ -34,6 +34,8 @@ def apply_column_mapping(df: pd.DataFrame, mapping: dict[str, str]) -> pd.DataFr
 # -----------------------------
 # --------- Page Setup --------
 # -----------------------------
+
+
 st.set_page_config(
     page_title=APP_TITLE,
     page_icon="✅",
@@ -41,9 +43,48 @@ st.set_page_config(
     initial_sidebar_state="expanded",
 )
 
+st.markdown(
+    """
+    <style>
+    /* Primary buttons */
+    .stButton > button {
+        background-color: #0a2555 !important;
+        color: #ffffff !important;
+        border: 1px solid #0a2555 !important;
+        border-radius: 8px !important;
+    }
+    .stButton > button:hover {
+        background-color: #081f46 !important;
+        border-color: #081f46 !important;
+        color: #ffffff !important;
+    }
+    .stButton > button:active {
+        background-color: #061836 !important;
+        border-color: #061836 !important;
+        color: #ffffff !important;
+    }
+
+    /* Optional: make radio label/header text dark blue (esp. in sidebar) */
+    [data-testid="stSidebar"] label, 
+    [data-testid="stSidebar"] .stMarkdown, 
+    [data-testid="stSidebar"] p,
+    [data-testid="stSidebar"] span {
+        color: #0a2555 !important;
+    }
+    </style>
+    """,
+    unsafe_allow_html=True,
+)
+
+
+
+
+st.sidebar.image("PKF_Logo.png", width=160)
+
 # -----------------------------
 # --------- App Body ----------
 # -----------------------------
+
 
 st.sidebar.title("Audit Test Apps")
 

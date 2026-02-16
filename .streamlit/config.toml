@@ -1,0 +1,20 @@
+[theme]
+base = "light"
+
+# Brand palette
+backgroundColor = "#fafafa"            # Neutral Stone (main app body)
+primaryColor = "#0a2555"               # Dark Blue (accents, focus, widgets)
+secondaryBackgroundColor = "#ffffff"   # Cards/containers (keep clean)
+
+textColor = "#0a2555"                  # Dark blue text globally
+font = "sans serif"
+
+# Optional niceties
+linkColor = "#0a2555"
+showSidebarBorder = true
+
+[theme.sidebar]
+backgroundColor = "#e8e8e8"            # Neutral Cloud Dark (sidebar)
+secondaryBackgroundColor = "#e8e8e8"   # Keep consistent
+textColor = "#0a2555"                  # Sidebar text + headings
+primaryColor = "#0a2555"
