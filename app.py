@@ -14,6 +14,23 @@ from core.state1 import state_key
 from modules import REGISTRY
 
 
+def get_required_columns(module) -> list[str]:
+    """Return the list of required column names for this module (for mapping UI)."""
+    return list(
+        getattr(module, "BASE_REQUIRED", None)
+        or getattr(module, "template_columns", [])
+        or []
+    )
+
+
+def apply_column_mapping(df: pd.DataFrame, mapping: dict[str, str]) -> pd.DataFrame:
+    """Rename uploaded columns to required names. mapping: required_col -> uploaded_col name."""
+    if df is None or not mapping:
+        return df
+    reverse = {uploaded: required for required, uploaded in mapping.items() if uploaded}
+    return df.rename(columns=reverse)
+
+
 # -----------------------------
 # --------- Page Setup --------
 # -----------------------------
@@ -98,11 +115,48 @@ def render_module_ui(module_name: str):
         st.success(f"Loaded {len(df):,} rows")
         st.dataframe(df.head(50), use_container_width=True, height=260)
 
+    # ---------- 2b) Column mapping (map uploaded columns to required names) ----------
+    required_columns = get_required_columns(mod)
+    column_mapping: dict[str, str] = {}
+    if df is not None and required_columns:
+        uploaded_cols = [str(c).strip() for c in df.columns]
+        mapping_key = state_key(module_name, "column_mapping")
+        existing = st.session_state.get(mapping_key, {})
+        # Default: same name if present, else first uploaded column
+        for req in required_columns:
+            if req in uploaded_cols:
+                column_mapping[req] = existing.get(req, req)
+            else:
+                column_mapping[req] = existing.get(req, uploaded_cols[0] if uploaded_cols else "")
+            if column_mapping[req] not in uploaded_cols and uploaded_cols:
+                column_mapping[req] = uploaded_cols[0]
+
+        with st.container(border=True):
+            st.subheader("Map columns to required names")
+            st.caption("If your file uses different column names, map each required column to the column in your file. Then run tests below.")
+            ncols = min(3, len(required_columns)) or 1
+            cols = st.columns(ncols)
+            for i, req in enumerate(required_columns):
+                with cols[i % ncols]:
+                    default_idx = 0
+                    if column_mapping.get(req) in uploaded_cols:
+                        default_idx = uploaded_cols.index(column_mapping[req])
+                    chosen = st.selectbox(
+                        f"**{req}** ←",
+                        options=uploaded_cols,
+                        index=default_idx,
+                        key=state_key(module_name, f"map_{req}"),
+                        label_visibility="visible",
+                    )
+                    column_mapping[req] = chosen
+            st.session_state[mapping_key] = column_mapping
+
     st.divider()
 
     # ---------- 3) Test Checkboxes ----------
     st.subheader("Select Tests to Perform")
     selected_ids: list[str] = []
+    test_params: dict = {}
     tests = REGISTRY[module_name].tests
 
     with st.container(border=True):
@@ -112,12 +166,36 @@ def render_module_ui(module_name: str):
 
         for i, spec in enumerate(tests):
             default_val = select_all
-            checked = st.checkbox(
-                spec.label,
-                value=default_val,
-                key=state_key(module_name, f"test_{spec.id}"),
-                help=spec.description,
-            )
+            # Late Manual Journals (by time): show checkbox and input on same row inside section
+            if spec.id == "late_journals_by_time" and module_name == "Manual Journals Testing":
+                c1, c2 = st.columns([1, 2])
+                with c1:
+                    checked = st.checkbox(
+                        spec.label,
+                        value=default_val,
+                        key=state_key(module_name, f"test_{spec.id}"),
+                        help=spec.description,
+                    )
+                with c2:
+                    if checked:
+                        late_cutoff = st.text_input(
+                            "Cutoff time (journals posted *after* this time)",
+                            placeholder="e.g. 17:00 or 5:00 PM",
+                            key=state_key(module_name, "late_journals_cutoff"),
+                            help="24h: 17:00, 17:30:00 • 12h: 5:00 PM, 5:30:00 PM",
+                            label_visibility="collapsed",
+                        )
+                        test_params["late_journals_after_time"] = late_cutoff or ""
+                        st.caption("⚠️ Use a valid format: **17:00** or **5:00 PM**")
+                    else:
+                        late_cutoff = ""
+            else:
+                checked = st.checkbox(
+                    spec.label,
+                    value=default_val,
+                    key=state_key(module_name, f"test_{spec.id}"),
+                    help=spec.description,
+                )
             if checked:
                 selected_ids.append(spec.id)
 
@@ -133,7 +211,13 @@ def render_module_ui(module_name: str):
         key=state_key(module_name, "run"),
     )
     if run_clicked:
-        reports = REGISTRY[module_name].run_tests(df, selected_ids)
+        module = REGISTRY[module_name]
+        mapping = st.session_state.get(state_key(module_name, "column_mapping"), {})
+        df_to_run = apply_column_mapping(df, mapping) if df is not None else None
+        if module_name == "Manual Journals Testing":
+            reports = module.run_tests(df_to_run, selected_ids, test_params=test_params)
+        else:
+            reports = module.run_tests(df_to_run, selected_ids)
         st.session_state[state_key(module_name, "reports")] = reports
         st.success("Tests performed. See results below.")
 
@@ -153,6 +237,10 @@ def render_module_ui(module_name: str):
         for name, res_df in reports.items():
             with st.expander(f"📄 {name} ({len(res_df):,} rows)", expanded=False):
                 st.dataframe(res_df, use_container_width=True, height=260)
+                # Render any Plotly charts attached to this result (e.g. Manual Journals)
+                result_charts = getattr(res_df, "attrs", {}).get("charts", {})
+                for chart_name, fig in result_charts.items():
+                    st.plotly_chart(fig, use_container_width=True)
 
         st.divider()
 
